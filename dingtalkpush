@@ -1,0 +1,212 @@
+#!/usr/bin/env bash
+
+Version="1.00"
+#获取工作目录
+BaseDir="$(cd $(dirname "$0"); pwd -P)"
+#默认配置文件
+ConfigFile="/usr/local/etc/utilities/dingtalk.conf"
+
+#初始化默认参数
+function Initialization() {
+	#运行时参数
+	CURLCMD="/usr/bin/env curl -s"
+	Retry="3"
+	Interval="20"
+	#机器人配置
+	APIURL="https://oapi.dingtalk.com/robot/send"
+	Token=""
+	Secret=""
+	#实例信息
+	ExampleMessage="{\"msgtype\": \"text\",\"text\": {\"content\": \"我就是我, 是不一样的烟火\"}}"
+}
+
+function _red() { echo "\033[1;31m${1}\033[0m"; }
+function _green() { echo "\033[1;32m${1}\033[0m"; }
+function _yellow() { echo "\033[1;33m${1}\033[0m"; }
+function _blue() { echo "\033[1;34m${1}\033[0m"; }
+function _purple() { echo "\033[1;35m${1}\033[0m"; }
+function _cyan() { echo "\033[1;36m${1}\033[0m"; }
+function _white() { echo "\033[1;37m${1}\033[0m"; }
+
+#显示使用说明
+function Usage() {
+	echo -e "                ----==== $(_cyan "钉钉自定义机器人推送脚本") ====----\n"
+	[[ -n "${2}" ]] && echo -e "[$(_white "参数错误")] ${2}\n"
+	echo -e "使用说明:"
+	echo -e "  ${0} [选项] <推送内容>\n"
+	echo -e "如果已经将脚本路径加入到环境变量，也可直接使用："
+	echo -e "  ${0##*/} [选项] <推送内容>\n"
+	echo -e "命令选项说明\n\n参数:"
+	echo -e " -c, --config <文件路径>        加载指定配置文件，如使用了\"-d\"则该选项无效"
+	echo -e " -d, --default                  不加载配置文件，而是使用内置的参数"
+	echo -e " -q, --quiet                    静默模式，不显示脚本运行状态"
+	echo -e " -e, --example                  推送内置或配置文件指定的实例信息"
+	echo
+	echo -e " -l, --curl <文件路径>          使用指定的 curl 命令"
+	echo -e " -r, --retry <数字>             失败重试次数(仅触发限流时)"
+	echo -e " -i, --interval <数字>          重试间隔时间(秒)"
+	echo
+	echo -e " -a, --apiurl <字符串>          钉钉自定义机器人的API接口地址"
+	echo -e " -t, --token <字符串>           钉钉自定义机器人的Token"
+	echo -e " -s, --secret <字符串>          钉钉自定义机器人的Secret"
+	echo
+	echo -e " -v, --version                  显示脚本的版本并退出"
+	echo -e " -h, --help                     显示当前内容并退出"
+	echo -e "\n$(_white "参数优先级说明:")\n"
+	echo -e " 命令行参数优先级最高，其次是配置文件，脚本内置参数优先级最低。"
+	echo -e " 如果重复设置了参数值，将会以优先级高的值为准。在优先级相同的情况"
+	echo -e " 下，例如在命令行中重复设置了--token 参数，则以最后设置的值为准。"
+	exit ${1}
+}
+
+#分析命令参数
+function ParseParameters() {
+	Parameters="$(getopt -o a:c:dehi:l:qr:s:t:v -al config:,default,quiet,example,curl:,retry:,interval:,apiurl:,token:,secret:,version,help -n "${0##*/}" -- "$@" 2>&1)"
+	[[ ${?} -ne "0" ]] && Usage 1 "${Parameters%\'*}'"
+}
+
+#显示运行状态
+function ShowStatus() {
+	[[ -z "${Quiet}" ]] && echo -e "${1}"
+}
+
+#加载配置文件
+function GetConfig() {
+	eval set -- "${Parameters}"
+	while [[ -n "${1}" ]]; do
+		case ${1} in
+		-c|-config|--config)
+			shift; [[ -n "${1}" ]] && ConfigFile="${1}" ;;
+		-d|-default|--default)
+			ConfigFile="" && break ;;
+		esac; shift
+	done
+	if [[ -n "${ConfigFile}" ]]; then
+		[[ -n "${ConfigFile%%/*}" ]] && ConfigFile="${BaseDir}/${ConfigFile}"
+		[[ -r "${ConfigFile}" ]] && while read line; do eval "$line"; done < "${ConfigFile}" || ShowStatus "[$(_yellow "提醒")] 读取配置文件\"${ConfigFile}\"失败，使用默认参数。"
+	fi
+}
+
+#设置运行参数
+function GetParameters() {
+	eval set -- "${Parameters}"
+	while [[ -n ${1} ]]; do
+		case ${1} in
+		-q|-quiet|--quiet)
+			Quiet="YES"
+			;;
+		-e|-example|--example)
+			Example="YES"
+			;;
+		-l|-curl|--curl)
+			shift
+			CURLCMD="$1"
+			;;
+		-r|-retry|--retry)
+			shift
+			Retry="$1"
+			;;
+		-i|-interval|--interval)
+			shift
+			Interval="$1"
+			;;
+		-a|-apiurl|--apiurl)
+			shift
+			APIURL="$1"
+			;;
+		-t|-token|--token)
+			shift
+			Token="$1"
+			;;
+		-s|-secret|--secret)
+			shift
+			Secret="$1"
+			;;
+		-v|-version|--version)
+			echo "${0##*/} V${Version}"
+			exit
+			;;
+		-h|-help|--help)
+			Usage
+			;;
+		--)
+			shift
+			break
+			;;
+		esac
+		shift
+	done
+	if [[ -z "${Example}" ]]; then
+		[[ -n "${1}" ]] && Message="${1}"
+	else
+		Message="${ExampleMessage}"
+	fi
+	[[ -z "${Message}" ]] && Usage 1 "请输入推送内容！"
+}
+
+#获取时间戳
+function GetTimeStamp() {
+	#TimeStamp="$(date -u +"%s%3N")" 某些系统的data命令不支持%N格式，因此毫秒值使用了随机数
+	TimeStamp="$(date -u +"%s")"
+	TimeStamp="${TimeStamp}$((${TimeStamp}%1000))"
+	ShowStatus "[$(_white "信息")] 当前的时间戳：${TimeStamp}"
+}
+
+#URL编码
+URLEncode() {
+	for c in $(echo -n "${1}" | sed 's/[^\n]/&\n/g'); do
+		case ${c} in
+			[a-zA-Z0-9~._-]) printf "%s" "${c}" ;;
+			*) printf "%%%02X" "'${c}" ;;
+		esac
+	done
+}
+
+#推送消息内容
+function PushMessage() {
+	try="0"
+	ShowStatus "[$(_white "信息")] 开始推送消息。"
+	while [[ "${try}" -le "${Retry}" ]]; do
+		try="$((${try}+1))"
+		[[ -n "${Status}" ]] && ShowStatus "${Status}" && sleep ${Interval}
+		APIURL="${APIURL}?access_token=${Token}"
+		if [[ -n "${Secret}" ]]; then
+			GetTimeStamp
+			Sign="$(URLEncode $(echo -en "${TimeStamp}\n${Secret}" | openssl dgst -sha256 -hmac "${Secret}" -binary | openssl base64))"
+			APIURL="${APIURL}&timestamp=${TimeStamp}&sign=${Sign}"
+		fi
+		APIResult="$(${CURLCMD} -H "Content-Type:application/json" -X POST --data "${Message}" "${APIURL}")"
+		ErrCode="$(expr "${APIResult}" : ".*\"errcode\"\:[ ]*\([^,]*\),.*")"
+		ErrMsg="$(expr "${APIResult}" : ".*\"errmsg\"\:[ ]*\"\([^\"]*\)\".*")"
+		[[ -z "${ErrCode}" ]] && ErrCode="0"
+		Status=""
+		case "${ErrCode}" in
+		130101)
+			Status="[$(_yellow "提醒")] 触发限流，${Interval}秒后重试。"
+			ErrMsg="消息推送过于频繁，每分钟只能推送20条消息。"
+			ExitCode=2
+			;;
+		0)
+			ExitCode=0
+			break
+			;;
+		*)
+			ExitCode=3
+			break
+			;;
+		esac
+	done
+	[[ "${ErrCode}" -eq 0 ]] && ShowStatus "[$(_green "成功")] 推送消息成功。" || ShowStatus "[$(_red "失败") $(_white "${ErrCode}")] 推送消息失败：${ErrMsg}"
+}
+
+#加载默认参数
+Initialization
+#解析命令参数
+ParseParameters "$@"
+#加载配置文件
+GetConfig
+#加载命令参数
+GetParameters
+#推送消息
+PushMessage
+exit ${ExitCode}
