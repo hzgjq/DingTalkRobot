@@ -4,7 +4,7 @@ Version="1.01"
 #获取工作目录
 BaseDir="$(cd $(dirname "$0"); pwd -P)"
 #默认配置文件
-ConfigFile="dingtalkpush.conf"
+ConfigFile="dingtalkrobot.conf"
 
 #初始化默认参数
 function Initialization() {
@@ -147,8 +147,7 @@ function GetParameters() {
 #获取时间戳
 function GetTimeStamp() {
 	#TimeStamp="$(date -u +"%s%3N")" 某些系统的data命令不支持%N格式，因此毫秒值使用了固定的值000
-	TimeStamp="$(date -u +"%s")"
-	TimeStamp="${TimeStamp}000"
+	TimeStamp="$(date -u +"%s")000"
 	ShowStatus "[$(_white "信息")] 当前的时间戳：${TimeStamp}"
 }
 
