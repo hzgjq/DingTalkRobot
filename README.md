@@ -1,4 +1,4 @@
-# DingTalkPush
+# DingTalkRobot
 利用钉钉自定义机器人进行消息推送的bash脚本
 
 ## 脚本使用方法
@@ -45,11 +45,11 @@ https://oapi.dingtalk.com/robot/send?access_token=XXXXXX
 **其余变量作用详见注释**
 
 ## 步骤三：测试程序
-在Linux上执行程序`dingtalkpush -e`
+在Linux上执行程序`dingtalkrobot -e`
 
 此时钉钉上应该已经收到了内置的测试消息
 
-可以通过 `dingtalkpush --help` 查看更多用法
+可以通过 `dingtalkrobot --help` 查看更多用法
 
 
 ## 消息类型及数据格式
